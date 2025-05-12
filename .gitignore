@@ -5,3 +5,5 @@
 data/raw/*
 stan/fits/*
 stan/models/*.exe
+data/processed/data.RDS
+data/processed/subID.RDS
