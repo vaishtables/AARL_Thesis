@@ -1,0 +1,34 @@
+---
+title: "RL Fitting"
+output: html_notebook
+---
+
+1.  Load libraries
+
+```{r setup, include=T}
+library(readr)
+library(cmdstanr)
+library(posterior)
+knitr::opts_chunk$set(echo = T, message = F, warning = F)
+```
+
+2.  Read data block
+
+```{r}
+data <- read_rds('../data/processed/data.RDS')
+```
+
+3.  Load and fit combined model ($\alpha_{R+},\alpha_{R-},\alpha_{P+},\alpha_{P-},\beta_{R},\beta_{P}$)
+
+```{r}
+vso_model <- cmdstan_model(exe_file = '../stan/models/vso_model.exe')
+fit_vso <- vso_model$sample(data = data, parallel_chains = 4,
+                            iter_warmup = 2000, iter_sampling = 2000,
+                            output_dir = '../stan/fits/',
+                            seed = 123)
+
+```
+
+```{r}
+
+```

@@ -1,0 +1,144 @@
+---
+title: "Preprocessing"
+output: html_document
+---
+
+1.  Load libraries
+
+```{r setup, include=T}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(abind)
+knitr::opts_chunk$set(echo = T, message = F, warning = F)
+```
+
+2.  Read raw trial data
+
+```{r}
+trial <- read_csv('../data/raw/raw_trial.csv', show_col_types = F)
+```
+
+3.  Clean raw trial data
+    -   subID: subject ID
+
+    -   choice: Conflict = 2, Safe = 1
+
+    -   reward: True = 1, False = 0
+
+    -   punish: True = 1, False = 0
+
+    -   trialID = trial ID
+
+```{r}
+trial <- trial %>%
+  select(subID, resp_conf, fb_rew, fb_pun, conf_rew, safe_rew, conf_pun, safe_pun) %>%  
+  rename(choice = resp_conf,
+         reward = fb_rew,
+         punish = fb_pun) %>% 
+  mutate(choice = choice + 1) %>% 
+  drop_na() %>% 
+  group_by(subID) %>% 
+  mutate(trialID = row_number()) %>% 
+  ungroup()
+```
+
+4.  Save subject ID vector object
+
+```{r}
+subID <- unique(trial$subID)
+saveRDS(subID, '../data/processed/subID.RDS')
+```
+
+5.  Structure data
+    -   NS: number of subjects
+
+    -   MT: maximum number of valid trials
+
+    -   ST: number of valid trials per subject (1:NS)
+
+    -   rew: observed reward outcomes (True = 1, False = 0) per subject, per trial (1:NS, 1:MT)
+
+    -   pun: observed punishment outcomes (True =1, False =0) per subject, per trial (1:NS, 1:MT)
+
+    -   choice: selected choices (Conflict = 2, Safe = 1) per subject, per trial (1:NS, 1:MT)
+
+    -   p_rew: possible rewards per subject, per trial, per choice (1:NS, 1:MT, 1:2)
+
+    -   p_pun: possible punishments per subject, per trial, per choice (1:NS, 1:MT, 1:2)
+
+        For missed trials, the values for choice, rew, pun = -1
+
+```{r}
+NS <- length(subID)
+MT <- max(trial$trialID)
+ST <- trial %>% group_by(subID) %>% summarise(ST = max(trialID)) %>% pull()
+
+choice_mat <- trial %>% 
+  select(subID, trialID, choice) %>% pivot_wider(names_from = subID, values_from = choice) %>%
+  replace(is.na(.), -1) %>% 
+  select(-trialID) %>%
+  t()
+
+rew_mat <- trial %>% 
+  select(subID, trialID, reward) %>% pivot_wider(names_from = subID, values_from = reward) %>%
+  replace(is.na(.), -1) %>% 
+  select(-trialID) %>% t()
+
+pun_mat <- trial %>% 
+  select(subID, trialID, punish) %>% pivot_wider(names_from = subID, values_from = punish) %>%
+  replace(is.na(.), -1) %>% 
+  select(-trialID) %>% t()
+
+conf_rew_mat <- trial %>% 
+  select(subID, trialID, conf_rew) %>% pivot_wider(names_from = subID, values_from = conf_rew) %>%
+  replace(is.na(.), -1) %>% 
+  select(-trialID) %>% t()
+
+safe_rew_mat <- trial %>% 
+  select(subID, trialID, safe_rew) %>% pivot_wider(names_from = subID, values_from = safe_rew) %>%
+  replace(is.na(.), -1) %>% 
+  select(-trialID) %>% t()
+
+p_rew <- abind(safe_rew_mat, conf_rew_mat, along = 3)
+
+conf_pun_mat <- trial %>% 
+  select(subID, trialID, conf_pun) %>% pivot_wider(names_from = subID, values_from = conf_pun) %>%
+  replace(is.na(.), -1) %>% 
+  select(-trialID) %>% t()
+
+safe_pun_mat <- trial %>% 
+  select(subID, trialID, safe_pun) %>% pivot_wider(names_from = subID, values_from = safe_pun) %>%
+  replace(is.na(.), -1) %>% 
+  select(-trialID) %>% t()
+
+p_pun <- abind(safe_pun_mat, conf_pun_mat, along = 3)
+```
+
+6.  Create Stan data block
+
+```{r}
+data <- list(
+  NS = NS,
+  MT = MT,
+  ST = ST,
+  rew = rew_mat,
+  pun = pun_mat,
+  choice = choice_mat,
+  p_rew = p_rew,
+  p_pun = p_pun
+)
+```
+
+7.  Save Stan data block object
+
+```{r}
+write_rds(data, '../data/processed/data.RDS')
+```
+
+8.  Create Stan models and compile executables
+
+```{r}
+library(cmdstanr)
+vso_model <- cmdstan_model('../stan/models/vso_model.stan', stanc_options = list('O1'))
+```
